@@ -17,6 +17,9 @@ An MCP (Model Context Protocol) server for controlling and reading Rigol DHO800/
 | `get_waveform` | Scaled voltage/time data from screen or deep memory, with stats |
 | `get_screenshot` | PNG of the scope's display |
 | `scpi_command` | Raw SCPI escape hatch for anything else in the guide |
+| `configure_cursors` | Set cursor mode (OFF/MANual/TRACk), type, source, and positions |
+| `get_cursor_values` | Read cursor positions and delta/frequency readouts |
+| `measure_between` | Delay or phase between two channels (RRDelay, FFPHase, etc.) |
 
 ## Scope setup
 
@@ -133,10 +136,11 @@ Check your client's docs for exactly where this config goes; the values themselv
 | `RIGOL_TIMEOUT` | `10` | I/O timeout, seconds |
 | `MCP_TRANSPORT` | `stdio` (local) / `streamable-http` (Docker) | Transport |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind address/port |
+| `RIGOL_ENABLE_SCPI_RAW` | `0` | Set to `1` to expose `scpi_command` (off by default) |
 
 ## Notes
 
 - Deep-memory reads (`get_waveform` with `mode="memory"`) need the scope in the STOP state, so call `run_control("stop")` first. Data comes back in chunks and gets decimated to `max_points` before returning.
 - Waveform samples are scaled to volts using the preamble: `V = (raw − YORigin − YREFerence) × YINCrement`.
 - A measurement value near `9.9e37` just means it's invalid for the current signal. `get_measurement` flags this for you.
-- `scpi_command` checks `:SYSTem:ERRor?` after write-only commands, so a typo in raw SCPI shows up right away instead of failing silently.
+- `scpi_command` is opt-in (set `RIGOL_ENABLE_SCPI_RAW=1`). It checks `:SYSTem:ERRor?` after write-only commands, so a typo in raw SCPI shows up right away instead of failing silently.
