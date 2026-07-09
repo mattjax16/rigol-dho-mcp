@@ -70,7 +70,26 @@ docker run -d --name rigol-dho-mcp \
   rigol-dho-mcp
 ```
 
-This exposes the MCP endpoint at `http://<docker-host>:8000/mcp` (streamable HTTP). You can also just edit the IP in `docker-compose.yml` and run `docker compose up -d`.
+This exposes the MCP endpoint at `http://<docker-host>:8000/mcp` (streamable HTTP). 
+
+#### Using Docker Compose
+
+Alternatively, you can use `docker-compose.yml`:
+
+```bash
+# Copy the example environment file and edit it with your scope's IP address:
+cp .env.example .env
+# Edit .env to set your scope's IP address under RIGOL_HOST
+
+# Then start the service:
+docker compose up -d
+
+# View logs:
+docker compose logs -f
+
+# Stop the service:
+docker compose down
+```
 
 ### stdio inside Docker
 
@@ -81,7 +100,7 @@ docker run -i --rm \
   rigol-dho-mcp
 ```
 
-> The container needs to be able to reach the scope's IP. On Linux the default bridge network usually works fine; if your scope only sits on the host's LAN segment and bridge routing doesn't reach it, add `--network host`.
+> The container needs to be able to reach the scope's IP. On Linux the default bridge network usually works fine; if your scope only sits on the host's LAN segment and bridge routing doesn't reach it, add `--network host`. For docker-compose, you can uncomment the `network_mode: "host"` line in `docker-compose.yml`.
 
 ## Using it with an MCP client
 
