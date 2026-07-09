@@ -32,6 +32,29 @@ RIGOL_HOST=192.168.1.100 rigol-dho-mcp
 
 This starts the server on stdio, ready for any MCP client to spawn and talk to it directly.
 
+## Testing SCPI commands locally (CLI)
+
+`rigol-dho-cli` talks straight to the scope over the same SCPI client the MCP server uses — no MCP client required. Handy for checking a command works, or debugging the connection before wiring it up as a tool.
+
+```bash
+pip install .
+
+# one-shot: run one or more commands and print the result, then exit
+RIGOL_HOST=192.168.1.100 rigol-dho-cli "*IDN?" ":CHANnel1:SCALe?"
+
+# interactive REPL: omit the commands
+RIGOL_HOST=192.168.1.100 rigol-dho-cli
+scpi> *IDN?
+RIGOL TECHNOLOGIES,DHO814,...
+scpi> :RUN
+OK (system error queue: 0,"No error")
+scpi> :DISPlay:DATA? PNG
+binary response (34521 bytes) -> saved to capture_00001.png
+scpi> quit
+```
+
+It reads the same `RIGOL_HOST` / `RIGOL_PORT` / `RIGOL_TIMEOUT` env vars as the server (or pass `--host` / `--port` / `--timeout` directly). Queries (commands ending in `?`) print the response; writes are followed by a `:SYSTem:ERRor?` check so a typo shows up immediately. Binary responses (screenshots, waveform data) are saved to a file in the current directory instead of being dumped to the terminal.
+
 ## Run with Docker
 
 ### HTTP transport (recommended for containers)
