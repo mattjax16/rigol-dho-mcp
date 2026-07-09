@@ -1,17 +1,15 @@
 """MCP server for Rigol DHO800/DHO900 series oscilloscopes.
-
-Exposes the scope's SCPI command set (per the DHO800/900 Programming
-Guide) as MCP tools: run control, channel/timebase/trigger/acquisition
-setup, automatic measurements, scaled waveform capture, screenshots,
-and a raw SCPI escape hatch.
-
+...
 Configuration (environment variables):
-    RIGOL_HOST      IP address or hostname of the scope (required)
-    RIGOL_PORT      SCPI socket port (default 5555)
-    RIGOL_TIMEOUT   I/O timeout in seconds (default 10)
-    MCP_TRANSPORT   "stdio" (default) or "streamable-http"
-    MCP_HOST        Bind address for HTTP transport (default 0.0.0.0)
-    MCP_PORT        Port for HTTP transport (default 8000)
+    RIGOL_HOST            IP address or hostname of the scope (required)
+    RIGOL_PORT            SCPI socket port (default 5555)
+    RIGOL_TIMEOUT         I/O timeout in seconds (default 10)
+    MCP_TRANSPORT         "stdio" (default) or "streamable-http"
+    MCP_HOST              Bind address for HTTP transport (default 0.0.0.0)
+    MCP_PORT              Port for HTTP transport (default 8000)
+    RIGOL_ENABLE_SCPI_RAW Set to "1" to expose the scpi_command escape hatch
+                          (default off — arbitrary SCPI can leave the scope
+                          in any state, so it's opt-in)
 """
 
 from __future__ import annotations
@@ -29,9 +27,11 @@ from .scpi import ScpiClient, ScpiError
 # Setup
 # ---------------------------------------------------------------------------
 
+# Environment variables
 RIGOL_HOST = os.environ.get("RIGOL_HOST", "")
 RIGOL_PORT = int(os.environ.get("RIGOL_PORT", "5555"))
 RIGOL_TIMEOUT = float(os.environ.get("RIGOL_TIMEOUT", "10"))
+RIGOL_ENABLE_SCPI_RAW = os.environ.get("RIGOL_ENABLE_SCPI_RAW", "0") == "1"
 
 mcp = FastMCP(
     "rigol-dho800",
@@ -260,6 +260,104 @@ def configure_acquisition(
 
 
 # ---------------------------------------------------------------------------
+# Cursors
+# ---------------------------------------------------------------------------
+
+CursorMode = Literal["OFF", "MANual", "TRACk"]
+
+
+@mcp.tool()
+def configure_cursors(
+    mode: Annotated[CursorMode, Field(description="OFF disables cursors; MANual places two independent cursors; TRACk locks a cursor to a waveform on each channel")] = "MANual",
+    cursor_type: Annotated[
+        Literal["TIME", "AMPLitude"] | None,
+        Field(description="Manual mode only: TIME for horizontal (X) cursors measuring seconds; AMPLitude for vertical (Y) cursors measuring volts"),
+    ] = None,
+    source: Annotated[str | None, Field(description="Manual mode only: channel the cursors measure, e.g. CHAN1")] = None,
+    position_a: Annotated[float | None, Field(description="Manual mode: Cursor A position — seconds if cursor_type is TIME, volts if AMPLitude")] = None,
+    position_b: Annotated[float | None, Field(description="Manual mode: Cursor B position, same units as position_a")] = None,
+    track_source_a: Annotated[str | None, Field(description="Track mode only: channel Cursor A follows, e.g. CHAN1")] = None,
+    track_source_b: Annotated[str | None, Field(description="Track mode only: channel Cursor B follows, e.g. CHAN2")] = None,
+) -> dict:
+    """Configure cursor measurements.
+
+    Manual mode is the classic way to measure something by hand — e.g. put
+    Cursor A on the 10% level and Cursor B on the 90% level of a rising edge
+    (cursor_type="AMPLitude") to read amplitude, or place both on time
+    positions (cursor_type="TIME") to read an interval directly.
+
+    Track mode locks each cursor onto a channel's waveform and reports
+    wherever it currently sits, without you specifying a position.
+
+    Call get_cursor_values afterwards to read the resulting positions and
+    deltas.
+    """
+    s = scope()
+    s.write(f":CURSor:MODE {mode}")
+
+    if mode == "MANual":
+        if cursor_type is not None:
+            s.write(f":CURSor:MANual:TYPE {cursor_type}")
+        if source is not None:
+            s.write(f":CURSor:MANual:SOURce {source}")
+        # Positions live on different axes depending on cursor type: X (time)
+        # for TIME cursors, Y (volts) for AMPLitude cursors.
+        effective_type = (cursor_type or s.query(":CURSor:MANual:TYPE?")).upper()
+        axis = "X" if effective_type.startswith("TIME") else "Y"
+        if position_a is not None:
+            s.write(f":CURSor:MANual:CA{axis} {position_a}")
+        if position_b is not None:
+            s.write(f":CURSor:MANual:CB{axis} {position_b}")
+    elif mode == "TRACk":
+        if track_source_a is not None:
+            s.write(f":CURSor:TRACk:SOURce1 {track_source_a}")
+        if track_source_b is not None:
+            s.write(f":CURSor:TRACk:SOURce2 {track_source_b}")
+
+    return {"mode": s.query(":CURSor:MODE?")}
+
+
+@mcp.tool()
+def get_cursor_values() -> dict:
+    """Read current cursor positions and derived deltas.
+
+    Fields returned depend on the active cursor mode (see configure_cursors):
+    manual mode reports ax/ay/bx/by plus delta_x/delta_y; track mode reports
+    the same shape for whatever each cursor has locked onto. inverse_delta_x
+    (1/ΔX) is handy for reading a measured period back out as a frequency.
+    """
+    s = scope()
+    mode = s.query(":CURSor:MODE?")
+    if mode.startswith("MAN"):
+        return {
+            "mode": mode,
+            "type": s.query(":CURSor:MANual:TYPE?"),
+            "source": s.query(":CURSor:MANual:SOURce?"),
+            "ax": s.query(":CURSor:MANual:AXValue?"),
+            "ay": s.query(":CURSor:MANual:AYValue?"),
+            "bx": s.query(":CURSor:MANual:BXValue?"),
+            "by": s.query(":CURSor:MANual:BYValue?"),
+            "delta_x": s.query(":CURSor:MANual:XDELta?"),
+            "delta_y": s.query(":CURSor:MANual:YDELta?"),
+            "inverse_delta_x": s.query(":CURSor:MANual:IXDelta?"),
+        }
+    if mode.startswith("TRAC"):
+        return {
+            "mode": mode,
+            "source_a": s.query(":CURSor:TRACk:SOURce1?"),
+            "source_b": s.query(":CURSor:TRACk:SOURce2?"),
+            "ax": s.query(":CURSor:TRACk:AXValue?"),
+            "ay": s.query(":CURSor:TRACk:AYValue?"),
+            "bx": s.query(":CURSor:TRACk:BXValue?"),
+            "by": s.query(":CURSor:TRACk:BYValue?"),
+            "delta_x": s.query(":CURSor:TRACk:XDELta?"),
+            "delta_y": s.query(":CURSor:TRACk:YDELta?"),
+            "inverse_delta_x": s.query(":CURSor:TRACk:IXDelta?"),
+        }
+    return {"mode": mode, "note": "Cursors are off. Call configure_cursors first."}
+
+
+# ---------------------------------------------------------------------------
 # Measurements
 # ---------------------------------------------------------------------------
 
@@ -286,6 +384,40 @@ def get_measurement(
     except ValueError:
         v, invalid = value, False
     return {"item": item, "channel": channel, "value": v, "invalid": invalid}
+
+
+
+DELAY_PHASE_ITEMS = [
+    "RRDelay", "RFDelay", "FRDelay", "FFDelay",
+    "RRPHase", "RFPHase", "FRPHase", "FFPHase",
+]
+
+@mcp.tool()
+def measure_between(
+    item: Annotated[str, Field(description=f"Delay/phase item, one of: {', '.join(DELAY_PHASE_ITEMS)}")],
+    source_a: Annotated[int, Field(ge=1, le=4, description="Channel number 1-4 for Source A")] = 1,
+    source_b: Annotated[int, Field(ge=1, le=4, description="Channel number 1-4 for Source B")] = 2,
+) -> dict:
+    """Measure delay or phase between two channels.
+
+    RRDelay/FFDelay/RFDelay/FRDelay give the time offset between edges on
+    source_a and source_b (r=rising, f=falling — e.g. RFDelay is Source A's
+    rising edge to Source B's falling edge). RRPHase/RFPHase/FRPHase/FFPHase
+    give the equivalent phase deviation in degrees. A negative value means
+    Source A's edge occurred after Source B's. Values are queried directly
+    with both sources named, so this doesn't disturb any single-channel
+    measurement set up via get_measurement.
+    """
+    s = scope()
+    a, b = f"CHANnel{source_a}", f"CHANnel{source_b}"
+    s.write(f":MEASure:ITEM {item},{a},{b}")
+    value = s.query(f":MEASure:ITEM? {item},{a},{b}")
+    try:
+        v = float(value)
+        invalid = not math.isfinite(v) or abs(v) > 9e37
+    except ValueError:
+        v, invalid = value, False
+    return {"item": item, "source_a": source_a, "source_b": source_b, "value": v, "invalid": invalid}
 
 
 # ---------------------------------------------------------------------------
@@ -393,23 +525,27 @@ def get_screenshot() -> Image:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-def scpi_command(
-    command: Annotated[str, Field(description="Raw SCPI command, e.g. ':CHANnel1:SCALe 0.1' or ':ACQuire:SRATe?'")],
-) -> str:
-    """Send an arbitrary SCPI command from the DHO800/900 programming guide.
+if RIGOL_ENABLE_SCPI_RAW:
 
-    Commands ending in '?' are treated as queries and their response is
-    returned; others are write-only. Use for anything not covered by the
-    dedicated tools (cursors, math, decoding, mask tests, DVM, etc.).
-    """
-    s = scope()
-    if command.strip().endswith("?"):
-        return s.query(command)
-    s.write(command)
-    # Surface any instrument error the command may have raised.
-    err = s.query(":SYSTem:ERRor?")
-    return f"OK (system error queue: {err})"
+    @mcp.tool()
+    def scpi_command(
+        command: Annotated[str, Field(description="Raw SCPI command, e.g. ':CHANnel1:SCALe 0.1' or ':ACQuire:SRATe?'")],
+    ) -> str:
+        """Send an arbitrary SCPI command from the DHO800/900 programming guide.
+
+        Commands ending in '?' are treated as queries and their response is
+        returned; others are write-only. Use for anything not covered by the
+        dedicated tools (math, decoding, mask tests, DVM, etc.).
+
+        Disabled by default (RIGOL_ENABLE_SCPI_RAW=0) — arbitrary SCPI can
+        leave the scope in any state, so this must be explicitly enabled.
+        """
+        s = scope()
+        if command.strip().endswith("?"):
+            return s.query(command)
+        s.write(command)
+        err = s.query(":SYSTem:ERRor?")
+        return f"OK (system error queue: {err})"
 
 
 # ---------------------------------------------------------------------------
