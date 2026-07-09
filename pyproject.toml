@@ -1,0 +1,19 @@
+[project]
+name = "rigol-dho-mcp"
+version = "0.1.0"
+description = "MCP server for controlling Rigol DHO800/DHO900 oscilloscopes over LAN (SCPI)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.2.0",
+]
+
+[project.scripts]
+rigol-dho-mcp = "rigol_dho_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rigol_dho_mcp"]

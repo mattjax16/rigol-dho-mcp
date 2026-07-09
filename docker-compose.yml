@@ -1,0 +1,11 @@
+services:
+  rigol-dho-mcp:
+    build: .
+    container_name: rigol-dho-mcp
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      RIGOL_HOST: "192.168.1.100"   # <-- set to your scope's IP (Utility > IO on the scope)
+      RIGOL_PORT: "5555"
+      MCP_TRANSPORT: "streamable-http"
