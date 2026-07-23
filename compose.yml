@@ -6,11 +6,16 @@ services:
     
     # HTTP transport (recommended for containers) - exposes MCP endpoint at http://localhost:${MCP_PORT:-8000}/mcp
     ports:
-      - "${MCP_PORT:-8000}:${MCP_PORT:-8000}"
-    
+      - "${MCP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      # Uncomment/override any of these to take precedence over .env
+      # RIGOL_HOST: 192.168.1.100
+      # MCP_ALLOWED_ORIGINS: http://localhost:6274,http://127.0.0.1:6274
+      # MCP_ALLOWED_HOSTS: 192.168.2.10:8698,local-services.local:8698
     # Environment variables are loaded from .env file if it exists,
     # otherwise fall back to the defaults specified here.
-    environment:
       RIGOL_HOST: ${RIGOL_HOST:-192.168.1.100}
       RIGOL_PORT: ${RIGOL_PORT:-5555}
       RIGOL_TIMEOUT: ${RIGOL_TIMEOUT:-10}
