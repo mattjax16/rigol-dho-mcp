@@ -6,7 +6,7 @@ services:
     
     # HTTP transport (recommended for containers) - exposes MCP endpoint at http://localhost:${MCP_PORT:-8000}/mcp
     ports:
-      - "${MCP_PORT:-8000}:8000"
+      - "${MCP_PORT:-8000}:${MCP_PORT:-8000}"
     
     # Environment variables are loaded from .env file if it exists,
     # otherwise fall back to the defaults specified here.
