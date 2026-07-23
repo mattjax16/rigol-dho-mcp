@@ -10,6 +10,22 @@ Configuration (environment variables):
     RIGOL_ENABLE_SCPI_RAW Set to "1" to expose the scpi_command escape hatch
                           (default off — arbitrary SCPI can leave the scope
                           in any state, so it's opt-in)
+
+    HTTP transport security (only relevant when MCP_TRANSPORT is
+    "streamable-http" or "sse"):
+    MCP_ENABLE_DNS_REBINDING_PROTECTION
+                          Validate Origin/Host headers on incoming requests
+                          (default "1"/on). Set to "0" to disable — only do
+                          this on a trusted local network.
+    MCP_ALLOWED_ORIGINS   Comma-separated list of allowed Origin header
+                          values, e.g. "http://localhost:6274" for MCP
+                          Inspector. Only enforced when DNS rebinding
+                          protection is on. Default: empty (blocks all
+                          browser-origin requests).
+    MCP_ALLOWED_HOSTS     Comma-separated list of allowed Host header
+                          values, e.g. "192.168.2.10:8698". Only enforced
+                          when DNS rebinding protection is on. Default:
+                          empty (blocks all requests).
 """
 
 from __future__ import annotations
@@ -19,6 +35,7 @@ import os
 from typing import Annotated, Literal
 
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 
 from .scpi import ScpiClient, ScpiError
@@ -33,10 +50,30 @@ RIGOL_PORT = int(os.environ.get("RIGOL_PORT", "5555"))
 RIGOL_TIMEOUT = float(os.environ.get("RIGOL_TIMEOUT", "10"))
 RIGOL_ENABLE_SCPI_RAW = os.environ.get("RIGOL_ENABLE_SCPI_RAW", "0") == "1"
 
+
+def _split_csv_env(name: str) -> list[str]:
+    """Parse a comma-separated env var into a list, dropping blanks/whitespace."""
+    return [v.strip() for v in os.environ.get(name, "").split(",") if v.strip()]
+
+
+# DNS-rebinding protection (validates Origin/Host headers on HTTP transport).
+# Defaults to ON with empty allowlists, which blocks every browser-origin
+# request (e.g. MCP Inspector's web UI) until MCP_ALLOWED_ORIGINS/_HOSTS are
+# set. Set MCP_ENABLE_DNS_REBINDING_PROTECTION=0 to disable checks entirely
+# for local/trusted-network debugging.
+MCP_ENABLE_DNS_REBINDING_PROTECTION = os.environ.get("MCP_ENABLE_DNS_REBINDING_PROTECTION", "1") == "1"
+MCP_ALLOWED_ORIGINS = _split_csv_env("MCP_ALLOWED_ORIGINS")
+MCP_ALLOWED_HOSTS = _split_csv_env("MCP_ALLOWED_HOSTS")
+
 mcp = FastMCP(
     "rigol-dho800",
     host=os.environ.get("MCP_HOST", "0.0.0.0"),
     port=int(os.environ.get("MCP_PORT", "8000")),
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=MCP_ENABLE_DNS_REBINDING_PROTECTION,
+        allowed_origins=MCP_ALLOWED_ORIGINS,
+        allowed_hosts=MCP_ALLOWED_HOSTS,
+    ),
 )
 
 _client: ScpiClient | None = None
