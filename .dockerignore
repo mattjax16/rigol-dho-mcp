@@ -1,0 +1,34 @@
+# Keep secrets and local state out of the build context entirely. The
+# Dockerfile only COPYs specific paths, so nothing here would reach the image
+# anyway — but the whole context is uploaded to the Docker daemon, so there's
+# no reason to hand it a .env.
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+.pytest_cache/
+.mypy_cache/
+.coverage
+
+.vscode/
+.idea/
+.DS_Store
+
+# Captures written by rigol-dho-cli
+capture_*.png
+capture_*.bin
+shot_*.png
+
+Security-Audit.md
+compose.yml

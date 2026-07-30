@@ -3,36 +3,91 @@ services:
     build: .
     container_name: rigol-dho-mcp
     restart: unless-stopped
-    
-    # HTTP transport (recommended for containers) - exposes MCP endpoint at http://localhost:${MCP_PORT:-8000}/mcp
+    init: true
+
+    # This endpoint has no authentication of its own — anyone who can reach it
+    # can drive the scope and read screenshots. So it binds to loopback by
+    # default and is meant to be reached through a reverse proxy that adds
+    # auth. Set MCP_BIND_ADDRESS=0.0.0.0 in .env to publish it on the LAN
+    # directly, and understand that this makes the scope LAN-controllable by
+    # anyone.
     ports:
-      - "${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+      - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      # The process opens one outbound TCP socket and binds one port; it needs
+      # no Linux capabilities at all.
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    # Backstop against a runaway allocation. Note that a legitimate
+    # get_waveform(mode="memory") at 50M points expands into a Python float
+    # list of roughly 1.5-2 GB, so lower this only if you don't read deep
+    # memory — the container will be OOM-killed mid-read if you do.
+    mem_limit: ${MCP_MEM_LIMIT:-2g}
+
+    healthcheck:
+      # /health reports HTTP liveness only; it doesn't probe the scope, so a
+      # powered-off instrument won't cause a restart loop.
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:${MCP_PORT:-8000}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
     env_file:
-      - .env
+      # Optional so a fresh clone doesn't fail before it can explain itself —
+      # the defaults below still apply. Copy .env.example to .env to configure.
+      - path: .env
+        required: false
     environment:
       # Uncomment/override any of these to take precedence over .env
       # RIGOL_HOST: 192.168.1.100
-      
-      # MCP server security configuration (DNS rebinding protection)
-      MCP_ENABLE_DNS_REBINDING_PROTECTION: ${MCP_ENABLE_DNS_REBINDING_PROTECTION:-0} # Set to 1 to enable DNS rebinding protection (recommended)
-      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-http://localhost:6274,http://127.0.0.1:6274}
-      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-192.168.2.10:8698,local-services.local:8698}
-      
+
+      # MCP server security configuration (DNS rebinding protection).
+      # Both allowlists default to EMPTY on purpose: they're deployment
+      # specific, so hardcoding real values here would both leak the network
+      # layout into the repo and break every other deployment. Set them in
+      # .env — MCP_ALLOWED_HOSTS must contain the exact host:port you connect
+      # to, e.g. "scope.home.lab:8000", or every request is rejected on the
+      # Host header.
+      MCP_ENABLE_DNS_REBINDING_PROTECTION: ${MCP_ENABLE_DNS_REBINDING_PROTECTION:-1} # Set to 1 to enable DNS rebinding protection (recommended)
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
+
     # Environment variables are loaded from .env file if it exists,
     # otherwise fall back to the defaults specified here.
       RIGOL_HOST: ${RIGOL_HOST:-192.168.1.100}
       RIGOL_PORT: ${RIGOL_PORT:-5555}
       RIGOL_TIMEOUT: ${RIGOL_TIMEOUT:-10}
-      
+
       # MCP server configuration
       MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
       MCP_PORT: ${MCP_PORT:-8000}
-      
+
       # Optional: Enable raw SCPI escape hatch (set to "1" to enable)
       RIGOL_ENABLE_SCPI_RAW: ${RIGOL_ENABLE_SCPI_RAW:-0}
 
-    # Uncomment the following line if your scope is on a different network segment 
+    # Traefik ingress. Uncomment to route through the proxy instead of
+    # publishing the port, and drop the `ports:` block above when you do.
+    #
+    # Note this is a pure-API service: MCP clients can't complete an
+    # interactive browser login, so the usual authentik_domain@file forward-auth
+    # middleware would break every client. Use a non-interactive credential —
+    # a basicauth or bearer-token middleware — instead.
+    # labels:
+    #   - traefik.enable=true
+    #   - traefik.http.routers.rigol-dho-mcp.entrypoints=https
+    #   - traefik.http.routers.rigol-dho-mcp.rule=Host(`${RIGOL_MCP_HOSTNAME:-localhost}`)
+    #   - traefik.http.routers.rigol-dho-mcp.middlewares=rigol-dho-mcp-auth@file
+    #   - traefik.http.services.rigol-dho-mcp.loadbalancer.server.port=${MCP_PORT:-8000}
+
+    # Uncomment the following line if your scope is on a different network segment
     # and the default bridge network doesn't reach it:
     # network_mode: "host"
 

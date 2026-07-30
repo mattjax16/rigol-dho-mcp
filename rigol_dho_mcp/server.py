@@ -112,6 +112,33 @@ MEASUREMENT_ITEMS = [
     "VARiance", "PVRMS", "PPULses", "NPULses", "PEDGes", "NEDGes",
 ]
 
+MeasurementItem = Literal[
+    "VMAX", "VMIN", "VPP", "VTOP", "VBASe", "VAMP", "VAVG", "VRMS",
+    "OVERshoot", "PREShoot", "MARea", "MPARea", "PERiod", "FREQuency",
+    "RTIMe", "FTIMe", "PWIDth", "NWIDth", "PDUTy", "NDUTy", "TVMAX",
+    "TVMIN", "PSLewrate", "NSLewrate", "VUPPer", "VMID", "VLOWer",
+    "VARiance", "PVRMS", "PPULses", "NPULses", "PEDGes", "NEDGes",
+]
+
+TriggerSource = Literal[
+    "CHAN1", "CHAN2", "CHAN3", "CHAN4", "EXT", "ACL",
+    "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9",
+    "D10", "D11", "D12", "D13", "D14", "D15",
+]
+
+# Every tool parameter that gets interpolated into a SCPI command string is an
+# enumerated type or a bounded number. A free-form `str` here would let a
+# caller smuggle a newline through and have the instrument execute it as a
+# second command — arbitrary SCPI without RIGOL_ENABLE_SCPI_RAW. ScpiClient
+# rejects control characters as a backstop, but the schema is the first line of
+# defence and it also makes the tool easier for a model to call correctly.
+MemoryDepth = Literal["AUTO", "1k", "10k", "100k", "1M", "5M", "10M", "25M", "50M"]
+
+CursorSource = Literal[
+    "CHAN1", "CHAN2", "CHAN3", "CHAN4",
+    "MATH1", "MATH2", "MATH3", "MATH4",
+]
+
 # ---------------------------------------------------------------------------
 # Identification & status
 # ---------------------------------------------------------------------------
@@ -258,7 +285,7 @@ def configure_timebase(
 
 @mcp.tool()
 def configure_trigger_edge(
-    source: Annotated[str | None, Field(description="Trigger source: CHAN1-CHAN4, EXT, ACL (AC line), or D0-D15 (DHO900)")] = None,
+    source: Annotated[TriggerSource | None, Field(description="Trigger source: CHAN1-CHAN4, EXT, ACL (AC line), or D0-D15 (DHO900)")] = None,
     slope: Literal["POSitive", "NEGative", "RFALl"] | None = None,
     level: Annotated[float | None, Field(description="Trigger level in volts")] = None,
     sweep: Literal["AUTO", "NORMal", "SINGle"] | None = None,
@@ -287,7 +314,7 @@ def configure_trigger_edge(
 
 @mcp.tool()
 def configure_acquisition(
-    memory_depth: Annotated[str | None, Field(description="AUTO, 1k, 10k, 100k, 1M, 5M, 10M, 25M, or 50M")] = None,
+    memory_depth: Annotated[MemoryDepth | None, Field(description="AUTO, 1k, 10k, 100k, 1M, 5M, 10M, 25M, or 50M")] = None,
     acq_type: Literal["NORMal", "AVERages", "PEAK", "ULTRa"] | None = None,
     averages: Annotated[int | None, Field(description="Average count (power of 2, 2-65536); only for AVERages mode")] = None,
 ) -> dict:
@@ -321,11 +348,11 @@ def configure_cursors(
         Literal["TIME", "AMPLitude"] | None,
         Field(description="Manual mode only: TIME for horizontal (X) cursors measuring seconds; AMPLitude for vertical (Y) cursors measuring volts"),
     ] = None,
-    source: Annotated[str | None, Field(description="Manual mode only: channel the cursors measure, e.g. CHAN1")] = None,
+    source: Annotated[CursorSource | None, Field(description="Manual mode only: channel the cursors measure, e.g. CHAN1")] = None,
     position_a: Annotated[float | None, Field(description="Manual mode: Cursor A position — seconds if cursor_type is TIME, volts if AMPLitude")] = None,
     position_b: Annotated[float | None, Field(description="Manual mode: Cursor B position, same units as position_a")] = None,
-    track_source_a: Annotated[str | None, Field(description="Track mode only: channel Cursor A follows, e.g. CHAN1")] = None,
-    track_source_b: Annotated[str | None, Field(description="Track mode only: channel Cursor B follows, e.g. CHAN2")] = None,
+    track_source_a: Annotated[CursorSource | None, Field(description="Track mode only: channel Cursor A follows, e.g. CHAN1")] = None,
+    track_source_b: Annotated[CursorSource | None, Field(description="Track mode only: channel Cursor B follows, e.g. CHAN2")] = None,
 ) -> dict:
     """Configure cursor measurements.
 
@@ -412,7 +439,7 @@ def get_cursor_values() -> dict:
 
 @mcp.tool()
 def get_measurement(
-    item: Annotated[str, Field(description=f"Measurement item, one of: {', '.join(MEASUREMENT_ITEMS)}")],
+    item: Annotated[MeasurementItem, Field(description=f"Measurement item, one of: {', '.join(MEASUREMENT_ITEMS)}")],
     channel: Annotated[int, Field(ge=1, le=4)] = 1,
 ) -> dict:
     """Perform an automatic measurement on a channel and return its value.
@@ -440,9 +467,14 @@ DELAY_PHASE_ITEMS = [
     "RRPHase", "RFPHase", "FRPHase", "FFPHase",
 ]
 
+DelayPhaseItem = Literal[
+    "RRDelay", "RFDelay", "FRDelay", "FFDelay",
+    "RRPHase", "RFPHase", "FRPHase", "FFPHase",
+]
+
 @mcp.tool()
 def measure_between(
-    item: Annotated[str, Field(description=f"Delay/phase item, one of: {', '.join(DELAY_PHASE_ITEMS)}")],
+    item: Annotated[DelayPhaseItem, Field(description=f"Delay/phase item, one of: {', '.join(DELAY_PHASE_ITEMS)}")],
     source_a: Annotated[int, Field(ge=1, le=4, description="Channel number 1-4 for Source A")] = 1,
     source_b: Annotated[int, Field(ge=1, le=4, description="Channel number 1-4 for Source B")] = 2,
 ) -> dict:
@@ -618,14 +650,38 @@ def main() -> None:
         import uvicorn
         from starlette.applications import Starlette
         from starlette.middleware.cors import CORSMiddleware
-        from starlette.routing import Mount
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+        from starlette.routing import Mount, Route
 
         @contextlib.asynccontextmanager
         async def lifespan(_app: Starlette):
             async with mcp.session_manager.run():
                 yield
 
-        app = Starlette(routes=[Mount("/", app=mcp.streamable_http_app())], lifespan=lifespan)
+        async def health(_request: Request) -> JSONResponse:
+            """Liveness probe for the container healthcheck.
+
+            Deliberately reports only that the HTTP server is up — it does not
+            touch the scope. A scope that's powered off or unplugged is a normal
+            state for a bench instrument, and folding that into the healthcheck
+            would put the container into a restart loop. It also carries no
+            detail about the scope or the host, since it answers before any
+            authentication a reverse proxy might add.
+            """
+            return JSONResponse({"status": "ok"})
+
+        # /health sits at the Starlette level, outside the mounted MCP app, so
+        # it isn't subject to the DNS-rebinding Host allowlist — the healthcheck
+        # connects to 127.0.0.1, which won't be in MCP_ALLOWED_HOSTS. Routes are
+        # matched in order, so it has to precede the catch-all mount.
+        app = Starlette(
+            routes=[
+                Route("/health", health, methods=["GET"]),
+                Mount("/", app=mcp.streamable_http_app()),
+            ],
+            lifespan=lifespan,
+        )
         # Reuses MCP_ALLOWED_ORIGINS so one env var configures both the
         # DNS-rebinding Origin check above and CORS here. Empty means no
         # browser origin is allowed, same as the existing default.
