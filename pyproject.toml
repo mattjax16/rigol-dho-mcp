@@ -5,7 +5,7 @@ description = "MCP server for controlling Rigol DHO800/DHO900 oscilloscopes over
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2.0,<2.0.0",
 ]
 
 [project.scripts]
