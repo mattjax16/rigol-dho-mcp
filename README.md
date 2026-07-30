@@ -148,7 +148,47 @@ If your client doesn't support remote MCP servers natively, use `mcp-remote` as 
 
 Check your client's docs for exactly where this config goes; the values themselves don't change.
 
-## Environment variables
+## Security & Network Configuration
+
+### HTTP Endpoint Access Restrictions
+
+When running with **HTTP transport** (Docker or `MCP_TRANSPORT=streamable-http`), the MCP server exposes an endpoint at `http://<host>:8000/mcp`.
+
+> ⚠️ **Important:** This endpoint has **no authentication mechanism**. Anyone who can reach this port can control your oscilloscope and read waveform data/screenshots.
+
+Because of that, `compose.yml` publishes the port on **loopback only** (`MCP_BIND_ADDRESS=127.0.0.1`) by default. The intended deployment is behind a reverse proxy that adds authentication.
+
+- To expose it on your LAN anyway, set `MCP_BIND_ADDRESS=0.0.0.0` in `.env` — and be aware that this makes the scope controllable by anyone who can reach the port.
+- To put it behind Traefik, uncomment the labels block in `compose.yml` and drop the `ports:` block.
+
+> ⚠️ **Authentik/SSO note:** this is a pure-API service. MCP clients can't complete an interactive browser login, so forward-auth SSO middleware (`authentik_domain@file`) will break every client. Use a non-interactive credential — a `basicauth` or bearer-token middleware — instead.
+
+**CORS is not access control.** `MCP_ALLOWED_ORIGINS` constrains *browsers* only; `curl`, a script, or any non-browser MCP client is unaffected by it regardless of how it's set.
+
+### DNS Rebinding Protection
+
+The HTTP transport includes DNS rebinding protection by default (`MCP_ENABLE_DNS_REBINDING_PROTECTION=1`). This validates `Origin` and `Host` headers on incoming requests to prevent malicious websites from accessing your MCP server through a browser. It is a useful control, but it is **not** authentication — a direct client that sets an allowed `Host` header passes it trivially.
+
+Both allowlists default to **empty**, which rejects everything:
+
+- **Allowed Hosts:** set `MCP_ALLOWED_HOSTS` to the exact `host:port` you connect to (e.g. `localhost:8000`, `scope.home.lab:8000`). **With protection enabled and this unset, every request is rejected with `421 Misdirected Request`** — if the server appears to reject all traffic, this is why.
+- **Allowed Origins:** set `MCP_ALLOWED_ORIGINS` only if a browser-based client needs access (e.g. `http://localhost:6274` for MCP Inspector).
+
+The container healthcheck endpoint `/health` is intentionally exempt from these checks and reports HTTP liveness only — it doesn't probe the scope and returns no information about it.
+
+> ⚠️ **Warning:** Setting `MCP_ENABLE_DNS_REBINDING_PROTECTION=0` or using `MCP_ALLOWED_ORIGINS=*` disables this protection entirely and should only be done on trusted, isolated networks for local testing.
+
+### SCPI Input Handling
+
+Every tool parameter that gets interpolated into a SCPI command is an enumerated type or a bounded number, and the SCPI client rejects any command containing control characters or non-ASCII. This is what keeps `RIGOL_ENABLE_SCPI_RAW=0` meaningful: SCPI is newline-delimited, so without both checks an embedded newline in a parameter would reach the scope as a second, arbitrary command.
+
+If you add a tool, **do not** interpolate a free-form `str` into a command string — give the parameter a `Literal` type.
+
+### Raw SCPI Escape Hatch Risks
+
+The `scpi_command` tool is **opt-in** via the `RIGOL_ENABLE_SCPI_RAW=1` environment variable. When enabled, it accepts arbitrary SCPI commands from the MCP client.
+
+> ⚠️ **Warning:** Arbitrary SCPI can leave the scope in any state or perform destructive actions (e.g., `*RST` to reset the scope, changing critical settings). Ensure your MCP client has appropriate access controls and that you understand the risks before enabling this feature.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -156,7 +196,12 @@ Check your client's docs for exactly where this config goes; the values themselv
 | `RIGOL_PORT` | `5555` | SCPI socket port |
 | `RIGOL_TIMEOUT` | `10` | I/O timeout, seconds |
 | `MCP_TRANSPORT` | `stdio` (local) / `streamable-http` (Docker) | Transport |
-| `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind address/port |
+| `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind address/port *inside* the container |
+| `MCP_BIND_ADDRESS` | `127.0.0.1` | Host interface compose publishes the port on. `0.0.0.0` exposes the unauthenticated endpoint to the LAN |
+| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `1` | Validate `Origin`/`Host` headers on the HTTP transport |
+| `MCP_ALLOWED_HOSTS` | — (empty) | Allowed `Host` values. **Required** when protection is on, or all requests get `421` |
+| `MCP_ALLOWED_ORIGINS` | — (empty) | Allowed browser origins; also configures CORS |
+| `MCP_MEM_LIMIT` | `2g` | Container memory ceiling (deep-memory reads need ~2 GB) |
 | `RIGOL_ENABLE_SCPI_RAW` | `0` | Set to `1` to expose `scpi_command` (off by default) |
 
 ## Notes
