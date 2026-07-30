@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "MCP server for controlling Rigol DHO800/DHO900 oscilloscopes over LAN (SCPI)"
 readme = "README.md"
 requires-python = ">=3.10"
+# Both bounded at each end. The exact versions the container is built and
+# tested against live in requirements.lock (hash-verified); these ranges are
+# for `pip install .` outside Docker.
 dependencies = [
-    "mcp>=1.2.0,<2.0.0",
-    "uvicorn",
+    "mcp>=1.29.0,<2.0.0",
+    "uvicorn>=0.52.0,<1.0.0",
 ]
 
 [project.scripts]

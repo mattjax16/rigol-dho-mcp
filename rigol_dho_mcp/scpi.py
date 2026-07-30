@@ -12,12 +12,49 @@ the payload length in bytes.
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
+from typing import NoReturn
+
+logger = logging.getLogger(__name__)
+
+# Caps on anything sized by the remote endpoint. A real DHO800/900 never
+# approaches either, but the TMC header and the line reader are both driven by
+# bytes the instrument chooses, so a malfunctioning or spoofed endpoint could
+# otherwise dictate an arbitrarily large allocation.
+_MAX_LINE = 1 << 20  # 1 MiB; ASCII SCPI responses are a few hundred bytes
+_MAX_BLOCK = 64 << 20  # 64 MiB; well above a full 50M-point deep-memory chunk
 
 
 class ScpiError(Exception):
     pass
+
+
+def _validate_command(command: str) -> str:
+    """Reject anything that can't be exactly one SCPI line.
+
+    SCPI is newline-delimited, so an embedded newline in an interpolated
+    parameter would reach the instrument as a *separate command* — turning any
+    tool that formats user input into a command string into an arbitrary-SCPI
+    escape hatch, bypassing the RIGOL_ENABLE_SCPI_RAW gate. Rejecting all
+    control characters (rather than just \\r\\n) keeps this closed even if the
+    instrument treats some other byte as a delimiter, and rejecting non-ASCII
+    turns what would be an unhandled UnicodeEncodeError into a normal ScpiError.
+
+    Validation happens before any socket work, so a rejected command leaves the
+    connection untouched and still in sync.
+    """
+    command = command.strip()
+    if not command.isascii():
+        raise ScpiError(f"SCPI commands must be ASCII: {command!r}")
+    bad = sorted({c for c in command if ord(c) < 0x20 or ord(c) == 0x7F})
+    if bad:
+        raise ScpiError(
+            f"Refusing to send SCPI containing control characters {bad!r} — "
+            f"an embedded newline would be sent as a separate command: {command!r}"
+        )
+    return command
 
 
 class ScpiClient:
@@ -40,9 +77,15 @@ class ScpiClient:
             sock.settimeout(self.timeout)
             self._sock = sock
         except OSError as e:
+            # The address goes to the log rather than the exception: the error
+            # text reaches the MCP client, and on the unauthenticated HTTP
+            # transport that would hand an unauthenticated caller the scope's
+            # internal IP. Operators still get the full detail in the logs.
+            logger.error("Could not connect to scope at %s:%s — %s", self.host, self.port, e)
             raise ScpiError(
-                f"Could not connect to {self.host}:{self.port} — {e}. "
-                "Check that the scope is on the network and LAN control is enabled."
+                "Could not connect to the oscilloscope (address and underlying "
+                "error are in the server log). Check that RIGOL_HOST is correct, "
+                "the scope is on the network, and LAN control is enabled."
             ) from e
 
     def close(self) -> None:
@@ -58,16 +101,17 @@ class ScpiClient:
         assert self._sock is not None
         return self._sock
 
-    def _reset_and_raise(self, msg: str, cause: Exception | None = None):
+    def _reset_and_raise(self, msg: str, cause: Exception | None = None) -> NoReturn:
         self.close()
         raise ScpiError(msg) from cause
 
     # -- low-level I/O -----------------------------------------------------
 
     def _send(self, command: str) -> None:
+        command = _validate_command(command)
         sock = self._ensure()
         try:
-            sock.sendall(command.strip().encode("ascii") + b"\n")
+            sock.sendall(command.encode("ascii") + b"\n")
         except OSError as e:
             self._reset_and_raise(f"Send failed for '{command}': {e}", e)
 
@@ -83,6 +127,11 @@ class ScpiClient:
                 chunks.extend(b)
                 if chunks.endswith(b"\n"):
                     break
+                if len(chunks) > _MAX_LINE:
+                    self._reset_and_raise(
+                        f"Response exceeded {_MAX_LINE} bytes with no line "
+                        "terminator; abandoning the read."
+                    )
         except socket.timeout as e:
             self._reset_and_raise("Timed out waiting for a response.", e)
         return bytes(chunks[:-1])
@@ -135,8 +184,22 @@ class ScpiClient:
                         f"Expected binary block for '{command}', got: "
                         f"{rest[:120].decode('ascii', errors='replace')!r}"
                     )
-                ndigits = int(self._read_exact(1))
-                length = int(self._read_exact(ndigits))
+                # Both of these are instrument-supplied; a malformed header
+                # would otherwise raise a bare ValueError past every caller's
+                # ScpiError handling, and an oversized length would be an
+                # allocation the remote end gets to choose.
+                try:
+                    ndigits = int(self._read_exact(1))
+                    length = int(self._read_exact(ndigits))
+                except ValueError as e:
+                    self._reset_and_raise(
+                        f"Malformed TMC block header in response to '{command}'.", e
+                    )
+                if length > _MAX_BLOCK:
+                    self._reset_and_raise(
+                        f"Refusing a {length}-byte block for '{command}' "
+                        f"(limit {_MAX_BLOCK} bytes)."
+                    )
                 payload = self._read_exact(length)
                 # Consume trailing terminator (usually a single \n).
                 try:
