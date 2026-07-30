@@ -2,6 +2,8 @@
 
 An MCP (Model Context Protocol) server for controlling and reading Rigol DHO800/DHO900 series oscilloscopes over LAN, built on the SCPI command set from the official programming guide. It talks directly to the scope's raw SCPI socket on port 5555, so there's no VISA install to deal with.
 
+> **Note:** This server is currently pinned to `mcp<2.0.0`. The official MCP Python SDK's v2.0 release renames `FastMCP` to `MCPServer` and moves it out of `mcp.server.fastmcp`, which breaks this server's imports as written. The pin in `pyproject.toml` keeps deploys working until `server.py` is migrated to the v2 API.
+
 ## Tools
 
 | Tool | Purpose |
@@ -163,3 +165,7 @@ Check your client's docs for exactly where this config goes; the values themselv
 - Waveform samples are scaled to volts using the preamble: `V = (raw − YORigin − YREFerence) × YINCrement`.
 - A measurement value near `9.9e37` just means it's invalid for the current signal. `get_measurement` flags this for you.
 - `scpi_command` is opt-in (set `RIGOL_ENABLE_SCPI_RAW=1`). It checks `:SYSTem:ERRor?` after write-only commands, so a typo in raw SCPI shows up right away instead of failing silently.
+
+## Known issue: pending MCP v2 migration
+
+The official MCP Python SDK's v2.0 release (stable as of late July 2026) replaces `FastMCP` with `MCPServer` and relocates it out of `mcp.server.fastmcp`. `server.py` still imports the old path (`from mcp.server.fastmcp import FastMCP, Image`), so an unpinned install pulls v2 and crashes on startup with `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. The `mcp<2.0.0` pin in `pyproject.toml` avoids this for now. Migrating `server.py` to the v2 API is planned but not yet done.
