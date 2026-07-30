@@ -22,6 +22,14 @@ Configuration (environment variables):
                           Inspector. Only enforced when DNS rebinding
                           protection is on. Default: empty (blocks all
                           browser-origin requests).
+
+                          This same list is also used to configure CORS on
+                          the streamable-http transport, so a browser-based
+                          client (e.g. testing the server from a local
+                          desktop app or dashboard) needs its origin listed
+                          here to get past both the DNS-rebinding check and
+                          the CORS preflight. Default: empty (no browser
+                          origin is allowed either way).
     MCP_ALLOWED_HOSTS     Comma-separated list of allowed Host header
                           values, e.g. "192.168.2.10:8698". Only enforced
                           when DNS rebinding protection is on. Default:
@@ -594,7 +602,39 @@ def main() -> None:
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     if transport not in ("stdio", "streamable-http", "sse"):
         raise SystemExit(f"Unknown MCP_TRANSPORT: {transport}")
-    mcp.run(transport=transport)
+
+    if transport == "streamable-http":
+        # mcp.run() doesn't expose a way to attach CORS middleware, and the
+        # SDK's streamable-http app has no OPTIONS handler by default — a
+        # browser-based client (e.g. testing this server from a local
+        # dashboard or console) sends a CORS preflight OPTIONS request that
+        # gets a bare 405 Method Not Allowed otherwise. Build the ASGI app
+        # ourselves so we can wrap it in CORSMiddleware.
+        import contextlib
+
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.middleware.cors import CORSMiddleware
+        from starlette.routing import Mount
+
+        @contextlib.asynccontextmanager
+        async def lifespan(_app: Starlette):
+            async with mcp.session_manager.run():
+                yield
+
+        app = Starlette(routes=[Mount("/", app=mcp.streamable_http_app())], lifespan=lifespan)
+        # Reuses MCP_ALLOWED_ORIGINS so one env var configures both the
+        # DNS-rebinding Origin check above and CORS here. Empty means no
+        # browser origin is allowed, same as the existing default.
+        app = CORSMiddleware(
+            app,
+            allow_origins=MCP_ALLOWED_ORIGINS,
+            allow_methods=["GET", "POST", "DELETE"],
+            expose_headers=["Mcp-Session-Id"],
+        )
+        uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)
+    else:
+        mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
