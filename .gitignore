@@ -22,6 +22,8 @@ ENV/
 .uv/
 pip-wheel-metadata/
 *.whl
+# NB: requirements.lock is intentionally TRACKED — the Dockerfile installs from
+# it with --require-hashes. Don't add a *.lock rule here.
 
 # Testing & coverage
 .pytest_cache/
@@ -33,10 +35,11 @@ htmlcov/
 coverage.xml
 *.cover
 
-# Type checking
+# Type checking & linting
 .mypy_cache/
 .pytype/
 .pyre/
+.ruff_cache/
 
 # IDE / editors
 .vscode/
@@ -46,9 +49,24 @@ coverage.xml
 *~
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Docker
-.dockerignore
+# AI tooling. Ignores these directories wholesale, including machine-local
+# state like .claude/settings.local.json (per-machine permission grants).
+# Note this also excludes shared config such as .claude/settings.json and
+# .claude/agents/ — if you ever want to commit project-wide agent or hook
+# settings, this rule needs narrowing to .claude/settings.local.json.
+.claude
+.pi
+
+# Logs
+*.log
+
+# Captures written by rigol-dho-cli. A scope screenshot shows whatever is on
+# the bench at the time, so these stay out of the repo by default.
+capture_*.png
+capture_*.bin
+shot_*.png
 
 # Environment / secrets
 .env
