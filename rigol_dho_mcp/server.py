@@ -29,7 +29,10 @@ Configuration (environment variables):
                           desktop app or dashboard) needs its origin listed
                           here to get past both the DNS-rebinding check and
                           the CORS preflight. Default: empty (no browser
-                          origin is allowed either way).
+                          origin is allowed either way). CORS also allows
+                          all request headers (Content-Type, Mcp-Session-Id,
+                          etc.) so the preflight doesn't fail separately on
+                          headers even once the origin is allowed.
     MCP_ALLOWED_HOSTS     Comma-separated list of allowed Host header
                           values, e.g. "192.168.2.10:8698". Only enforced
                           when DNS rebinding protection is on. Default:
@@ -626,10 +629,17 @@ def main() -> None:
         # Reuses MCP_ALLOWED_ORIGINS so one env var configures both the
         # DNS-rebinding Origin check above and CORS here. Empty means no
         # browser origin is allowed, same as the existing default.
+        #
+        # allow_headers=["*"] matters as much as allow_origins here: Starlette's
+        # CORSMiddleware checks origin, method, AND headers independently during
+        # preflight — without this, a browser preflight requesting permission for
+        # headers like Content-Type or Mcp-Session-Id gets rejected with its own
+        # "Disallowed CORS headers" 400, even when the origin is allowed.
         app = CORSMiddleware(
             app,
             allow_origins=MCP_ALLOWED_ORIGINS,
-            allow_methods=["GET", "POST", "DELETE"],
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
             expose_headers=["Mcp-Session-Id"],
         )
         uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)
