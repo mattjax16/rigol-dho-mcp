@@ -73,19 +73,22 @@ services:
       # Optional: Enable raw SCPI escape hatch (set to "1" to enable)
       RIGOL_ENABLE_SCPI_RAW: ${RIGOL_ENABLE_SCPI_RAW:-0}
 
-    # Traefik ingress. Uncomment to route through the proxy instead of
-    # publishing the port, and drop the `ports:` block above when you do.
+    # Traefik ingress (homelab deployment, traefik-kop). Keep the `ports:`
+    # block: traefik-kop routes to the host-published port, so the loadbalancer
+    # port below is MCP_PORT and MCP_BIND_ADDRESS must be reachable by kop.
     #
-    # Note this is a pure-API service: MCP clients can't complete an
-    # interactive browser login, so the usual authentik_domain@file forward-auth
-    # middleware would break every client. Use a non-interactive credential —
-    # a basicauth or bearer-token middleware — instead.
-    # labels:
-    #   - traefik.enable=true
-    #   - traefik.http.routers.rigol-dho-mcp.entrypoints=https
-    #   - traefik.http.routers.rigol-dho-mcp.rule=Host(`${RIGOL_MCP_HOSTNAME:-localhost}`)
-    #   - traefik.http.routers.rigol-dho-mcp.middlewares=rigol-dho-mcp-auth@file
-    #   - traefik.http.services.rigol-dho-mcp.loadbalancer.server.port=${MCP_PORT:-8000}
+    # Note this is a pure-API service with no auth of its own: anyone who can
+    # reach the route can drive the scope. MCP clients can't complete an
+    # interactive browser login, so authentik_domain@file would break every
+    # client. Add a basicauth or bearer-token middleware if you need a gate.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rigol-mcp.rule=Host(`rigol-mcp.basshome.cc`)"
+      - "traefik.http.routers.rigol-mcp.entrypoints=https"
+      - "traefik.http.routers.rigol-mcp.tls=true"
+      - "traefik.http.routers.rigol-mcp.tls.certresolver=cloudflare"
+      - "traefik.http.routers.rigol-mcp.middlewares=default-security-headers-relaxed@file"
+      - "traefik.http.services.rigol-mcp.loadbalancer.server.port=${MCP_PORT:-8000}"
 
     # Uncomment the following line if your scope is on a different network segment
     # and the default bridge network doesn't reach it:
