@@ -77,13 +77,15 @@ services:
     # block: traefik-kop routes to the host-published port, so the loadbalancer
     # port below is MCP_PORT and MCP_BIND_ADDRESS must be reachable by kop.
     #
-    # Note this is a pure-API service with no auth of its own: anyone who can
-    # reach the route can drive the scope. MCP clients can't complete an
-    # interactive browser login, so authentik_domain@file would break every
-    # client. Add a basicauth or bearer-token middleware if you need a gate.
+    # This is a pure-API service with no auth of its own. MCP clients can't
+    # complete an interactive browser login, so authentik_domain@file would
+    # break every client. Instead the router only matches requests carrying
+    # `Authorization: Bearer ${MCP_BEARER_TOKEN}` (set the token in Dockhand's
+    # stack env). Anything else gets a Traefik 404. The published port itself
+    # is NOT gated, only the Traefik route.
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.rigol-mcp.rule=Host(`rigol-mcp.basshome.cc`)"
+      - "traefik.http.routers.rigol-mcp.rule=Host(`rigol-mcp.basshome.cc`) && Header(`Authorization`, `Bearer ${MCP_BEARER_TOKEN:?set MCP_BEARER_TOKEN in Dockhand env}`)"
       - "traefik.http.routers.rigol-mcp.entrypoints=https"
       - "traefik.http.routers.rigol-mcp.tls=true"
       - "traefik.http.routers.rigol-mcp.tls.certresolver=cloudflare"
