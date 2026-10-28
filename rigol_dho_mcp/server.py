@@ -49,7 +49,7 @@ from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 
-from .scpi import ScpiClient, ScpiError
+from .scpi import ScpiClient, ScpiError, ScopeUnavailable
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -148,16 +148,54 @@ CursorSource = Literal[
 def identify() -> str:
     """Query the instrument identity (*IDN?) to verify the connection.
 
-    Returns manufacturer, model, serial number, and firmware version.
+    Returns manufacturer, model, serial number, and firmware version when online,
+    or an unavailable message when the scope is off or unreachable.
     Use this first to confirm the scope is reachable.
     """
-    return scope().query("*IDN?")
+    try:
+        return scope().query("*IDN?")
+    except ScopeUnavailable as exc:
+        return str(exc)
+
+
+@mcp.tool()
+def get_connection_status() -> dict:
+    """Check scope connectivity without changing instrument settings.
+
+    The MCP server remains available when the scope is off. An unreachable
+    scope may be powered off or disconnected; its actual power state is unknown.
+    """
+    try:
+        identity = scope().query("*IDN?")
+        return {"server_status": "ok", "scope_status": "online", "identity": identity}
+    except ScopeUnavailable as exc:
+        return _unavailable_status(exc)
+
+
+def _unavailable_status(exc: ScopeUnavailable) -> dict:
+    return {
+        "server_status": "ok",
+        "scope_status": "unavailable",
+        "power_state": "unknown",
+        "message": str(exc),
+    }
 
 
 @mcp.tool()
 def get_status() -> dict:
     """Get an overview of the scope's current state: trigger status,
-    sample rate, memory depth, timebase, and per-channel settings."""
+    sample rate, memory depth, timebase, and per-channel settings.
+
+    Returns scope_status=unavailable (not a server error) if the scope is off
+    or unreachable. No instrument settings are changed.
+    """
+    try:
+        return _read_status()
+    except ScopeUnavailable as exc:
+        return _unavailable_status(exc)
+
+
+def _read_status() -> dict:
     s = scope()
     status: dict = {
         "trigger_status": s.query(":TRIGger:STATus?"),
@@ -175,6 +213,8 @@ def get_status() -> dict:
     for ch in (1, 2, 3, 4):
         try:
             enabled = s.query(f":CHANnel{ch}:DISPlay?")
+        except ScopeUnavailable:
+            raise
         except ScpiError:
             break
         info = {"enabled": enabled.strip() == "1"}

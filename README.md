@@ -9,7 +9,8 @@ An MCP (Model Context Protocol) server for controlling and reading Rigol DHO800/
 | Tool | Purpose |
 |---|---|
 | `identify` | `*IDN?`, for verifying connectivity and grabbing model/serial/firmware |
-| `get_status` | Trigger state, sample rate, memory depth, timebase, per-channel settings |
+| `get_status` | Trigger state, sample rate, memory depth, timebase, per-channel settings; unavailable status if offline |
+| `get_connection_status` | Read-only connectivity check; server availability is separate from scope availability |
 | `run_control` | run / stop / single / autoset / clear / force_trigger |
 | `configure_channel` | Enable, V/div, offset, coupling, probe ratio, BW limit, invert |
 | `configure_timebase` | Main timebase scale and offset |
@@ -22,6 +23,32 @@ An MCP (Model Context Protocol) server for controlling and reading Rigol DHO800/
 | `configure_cursors` | Set cursor mode (OFF/MANual/TRACk), type, source, and positions |
 | `get_cursor_values` | Read cursor positions and delta/frequency readouts |
 | `measure_between` | Delay or phase between two channels (RRDelay, FFPHase, etc.) |
+
+## When the oscilloscope is off
+
+The MCP server stays available and continues listing its tools even when the
+oscilloscope is powered off. `/health` checks server liveness only.
+
+`get_connection_status` and `get_status` return a normal result when the scope
+cannot be reached:
+
+```json
+{
+  "server_status": "ok",
+  "scope_status": "unavailable",
+  "power_state": "unknown",
+  "message": "Oscilloscope unavailable: it may be powered off or disconnected from the network. The MCP server is running. Check scope power, LAN connectivity, and RIGOL_HOST. Power state cannot be determined from a connection failure."
+}
+```
+
+`identify` returns the same friendly message instead of a tool error. A failed
+measurement or control operation still reports a tool error with that message;
+it must not be mistaken for a successful operation. Protocol/configuration errors
+are not classified as power-off. Checks use `RIGOL_TIMEOUT` (default 10 seconds).
+A later call reconnects automatically when the instrument is available again;
+failed control commands are never replayed automatically.
+
+Run offline tests with `python -m unittest discover -s tests -v`.
 
 ## Scope setup
 

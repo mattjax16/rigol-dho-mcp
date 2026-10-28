@@ -31,6 +31,17 @@ class ScpiError(Exception):
     pass
 
 
+class ScopeUnavailable(ScpiError):
+    """The instrument is unreachable or its connection was lost."""
+
+
+SCOPE_UNAVAILABLE_MESSAGE = (
+    "Oscilloscope unavailable: it may be powered off or disconnected from the network. "
+    "The MCP server is running. Check scope power, LAN connectivity, and RIGOL_HOST. "
+    "Power state cannot be determined from a connection failure."
+)
+
+
 def _validate_command(command: str) -> str:
     """Reject anything that can't be exactly one SCPI line.
 
@@ -82,11 +93,7 @@ class ScpiClient:
             # transport that would hand an unauthenticated caller the scope's
             # internal IP. Operators still get the full detail in the logs.
             logger.error("Could not connect to scope at %s:%s — %s", self.host, self.port, e)
-            raise ScpiError(
-                "Could not connect to the oscilloscope (address and underlying "
-                "error are in the server log). Check that RIGOL_HOST is correct, "
-                "the scope is on the network, and LAN control is enabled."
-            ) from e
+            raise ScopeUnavailable(SCOPE_UNAVAILABLE_MESSAGE) from e
 
     def close(self) -> None:
         if self._sock is not None:
@@ -103,6 +110,8 @@ class ScpiClient:
 
     def _reset_and_raise(self, msg: str, cause: Exception | None = None) -> NoReturn:
         self.close()
+        if isinstance(cause, OSError) or msg.startswith("Connection closed"):
+            raise ScopeUnavailable(SCOPE_UNAVAILABLE_MESSAGE) from cause
         raise ScpiError(msg) from cause
 
     # -- low-level I/O -----------------------------------------------------
@@ -132,8 +141,8 @@ class ScpiClient:
                         f"Response exceeded {_MAX_LINE} bytes with no line "
                         "terminator; abandoning the read."
                     )
-        except socket.timeout as e:
-            self._reset_and_raise("Timed out waiting for a response.", e)
+        except OSError as e:
+            self._reset_and_raise("Failed while waiting for a response.", e)
         return bytes(chunks[:-1])
 
     def _read_exact(self, n: int) -> bytes:
@@ -145,9 +154,9 @@ class ScpiClient:
                 if not b:
                     self._reset_and_raise("Connection closed mid-transfer.")
                 buf.extend(b)
-        except socket.timeout as e:
+        except OSError as e:
             self._reset_and_raise(
-                f"Timed out after receiving {len(buf)}/{n} bytes.", e
+                f"Read failed after receiving {len(buf)}/{n} bytes.", e
             )
         return bytes(buf)
 
