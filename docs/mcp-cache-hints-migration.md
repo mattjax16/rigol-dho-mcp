@@ -61,6 +61,27 @@ mcp = MCPServer(
 )
 ```
 
+## Deployment-branch reality (check before writing code)
+
+The Dockhand git stack `rigol-dho-mcp` (Local-Services, env 10, `*/5 * * * *` auto-sync)
+tracks **`homelab-deployment`**, not `main`: as of 2026-11-09 it is 3 commits ahead of
+`main` and those commits touch `rigol_dho_mcp/server.py`, `rigol_dho_mcp/scpi.py`,
+`compose.yml`, `README.md` and `tests/test_availability.py`.
+
+Consequences:
+
+- The migration branch must be cut from `homelab-deployment` (or rebased onto it), not
+  from `main` — otherwise it silently misses the live scope-host and availability fixes.
+- `main` is currently behind the deployed code. Reconcile that first (merge
+  `homelab-deployment` into `main`, or deliberately keep the deployment branch and document
+  why) — otherwise "what is deployed" and "what the repo calls default" keep drifting.
+- `tests/test_availability.py` exists on the deployment branch: run it before and after the
+  SDK port. (Plan written from `main`, where the tests are not visible.)
+- A docs-only commit on any branch is picked up by the 5-minute sync but changes no
+  compose/runtime state, so this branch is deployment-neutral. Once real code lands, the
+  sync will redeploy the container within 5 minutes of the merge — deploy deliberately
+  instead, with `deploy_git_stack`.
+
 ## Steps
 
 1. Branch `mcp-cache-hints-plan` (this branch) carries the plan; the implementation goes
